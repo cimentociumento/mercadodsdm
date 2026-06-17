@@ -1,0 +1,4 @@
+import 'db_init_stub.dart'
+    if (dart.library.io) 'db_init_io.dart';
+
+Future<void> initializeDatabase() => initDatabase();

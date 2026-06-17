@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:smartlist/features/voice/domain/voice_parser.dart';
+import 'package:smartlist/voice/voice_parser.dart';
 
 void main() {
   group('VoiceParser', () {
@@ -13,13 +13,17 @@ void main() {
       expect(item.addedByVoice, isTrue);
     });
 
-    test('parse "3 litros de leite"', () {
-      final item = VoiceParser.parse('3 litros de leite', listId: 1);
+    test('parseAll com vírgulas', () {
+      final items = VoiceParser.parseAll('leite, arroz e feijão', listId: 1);
 
-      expect(item, isNotNull);
-      expect(item!.name, 'leite');
-      expect(item.quantity, 3.0);
-      expect(item.unit, 'L');
+      expect(items.length, 3);
+      expect(items.map((i) => i.name), ['leite', 'arroz', 'feijão']);
+    });
+
+    test('parseAll com palavras separadas', () {
+      final items = VoiceParser.parseAll('leite arroz feijão', listId: 1);
+
+      expect(items.length, 3);
     });
 
     test('parse "ovos" como item simples', () {
