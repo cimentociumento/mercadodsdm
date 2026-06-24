@@ -23,6 +23,9 @@ class ShoppingDb {
     return openDatabase(
       path,
       version: 1,
+      onConfigure: (database) async {
+        await database.execute('PRAGMA foreign_keys = ON');
+      },
       onCreate: (database, _) async {
         final batch = database.batch();
         batch.execute('''

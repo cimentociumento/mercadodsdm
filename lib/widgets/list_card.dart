@@ -41,7 +41,10 @@ class ListCard extends StatelessWidget {
               ),
               if (onArchive != null)
                 IconButton(
-                  onPressed: onArchive,
+                  onPressed: () {
+                    // Evita que o toque no arquivar dispare o onTap do card
+                    onArchive!();
+                  },
                   icon: const Icon(Icons.archive_outlined),
                   tooltip: 'Arquivar',
                 ),

@@ -39,6 +39,8 @@ class ListsNotifier extends AsyncNotifier<List<ShoppingList>> {
   Future<void> archiveList(int listId) async {
     await ref.read(shoppingDbProvider).setArchived(listId, archived: true);
     ref.invalidateSelf();
+    // Lista saiu das ativas e deve aparecer imediatamente em arquivadas
+    ref.invalidate(archivedListsProvider);
   }
 }
 
@@ -55,6 +57,8 @@ class ArchivedListsNotifier extends AsyncNotifier<List<ShoppingList>> {
   Future<void> restoreList(int listId) async {
     await ref.read(shoppingDbProvider).setArchived(listId, archived: false);
     ref.invalidateSelf();
+    // Lista restaurada deve voltar para a Home sem precisar recarregar manualmente
+    ref.invalidate(listsProvider);
   }
 }
 
@@ -128,22 +132,41 @@ final voiceProvider =
 
 class VoiceNotifier extends Notifier<VoiceUiState> {
   final _speech = SpeechToText();
-  bool _initialized = false;
-  bool _active = false;
-  int _listId = 0;
+  var _initialized = false;
+  var _active = false;
+  var _listenInProgress = false;
+  var _listId = 0;
   final _addedKeys = <String>{};
 
   @override
   VoiceUiState build() {
     ref.onDispose(() {
       _active = false;
-      _speech.stop();
-      _speech.cancel();
+      _safeStop();
     });
     return const VoiceUiState();
   }
 
+  /// Libera o recurso de STT antes de iniciar nova sessão (evita erro "busy").
+  Future<void> _safeStop() async {
+    try {
+      final wasListening = _speech.isListening;
+      await _speech.cancel(); // Interrompe imediatamente
+      if (wasListening) {
+        // Aguarda a liberação nativa (Android) para evitar error_busy/client
+        await Future.delayed(const Duration(milliseconds: 300));
+      }
+    } catch (e, stack) {
+      debugPrint('VoiceNotifier._safeStop: $e');
+      debugPrintStack(stackTrace: stack);
+    } finally {
+      _listenInProgress = false;
+    }
+  }
+
   Future<void> start(int listId) async {
+    await _safeStop();
+
     _listId = listId;
     _addedKeys.clear();
     _active = true;
@@ -161,14 +184,12 @@ class VoiceNotifier extends Notifier<VoiceUiState> {
 
     if (!_initialized) {
       _initialized = await _speech.initialize(
-        onError: (e) {
-          if (_active) state = state.copyWith(error: e.errorMsg);
-        },
+        onError: _handleSpeechError,
         onStatus: _onStatus,
       );
     }
 
-    if (!_initialized) {
+    if (!_initialized || !_speech.isAvailable) {
       _active = false;
       state = const VoiceUiState(error: 'Reconhecimento de voz indisponível');
       return;
@@ -178,20 +199,70 @@ class VoiceNotifier extends Notifier<VoiceUiState> {
   }
 
   Future<void> _listen() async {
-    if (!_active) return;
-    state = state.copyWith(isListening: true, clearError: true);
+    if (!_active || _listenInProgress) return;
 
-    await _speech.listen(
-      onResult: _onResult,
-      listenOptions: SpeechListenOptions(
-        partialResults: true,
-        listenMode: ListenMode.dictation,
-        localeId: 'pt_BR',
-        listenFor: const Duration(seconds: 120),
-        pauseFor: const Duration(milliseconds: 800),
-        cancelOnError: false,
-      ),
-    );
+    _listenInProgress = true;
+    try {
+      // Garante que não há sessão anterior ativa (regra 4.1 / 4.2 do rules.md)
+      if (_speech.isListening) {
+        await _speech.cancel();
+        await Future.delayed(const Duration(milliseconds: 300));
+      }
+
+      state = state.copyWith(isListening: true, clearError: true);
+
+      await _speech.listen(
+        onResult: _onResult,
+        listenOptions: SpeechListenOptions(
+          partialResults: true,
+          listenMode: ListenMode.dictation,
+          localeId: 'pt_BR',
+          listenFor: const Duration(seconds: 120),
+          pauseFor: const Duration(seconds: 3), // Aumentado de 800ms para evitar timeout imediato
+          cancelOnError: false,
+        ),
+      );
+    } catch (e, stack) {
+      debugPrint('VoiceNotifier._listen: $e');
+      debugPrintStack(stackTrace: stack);
+      if (_active) {
+        state = state.copyWith(
+          isListening: false,
+          error: 'Erro ao iniciar microfone. Toque em Ouvir novamente.',
+        );
+      }
+    } finally {
+      _listenInProgress = false;
+    }
+  }
+
+  void _handleSpeechError(dynamic error) {
+    if (!_active) return;
+
+    final String message = error.errorMsg ?? error.toString();
+    debugPrint('VoiceNotifier._handleSpeechError: $message');
+
+    final bool isTransient = message == 'error_no_match' || 
+                             message == 'error_speech_timeout';
+
+    if (isTransient) {
+      // Ignora o encerramento do microfone para erros de ausência de fala e mantém isListening
+      // para permitir o reinício automático pelo _onStatus (regra de ciclo de vida do rules.md).
+      state = state.copyWith(
+        error: message == 'error_no_match'
+            ? 'Pausa detectada. Continue falando...'
+            : 'Tempo limite atingido. Reconectando...',
+      );
+      return;
+    }
+
+    state = state.copyWith(error: message, isListening: false);
+
+    // Erro "busy" exige parar tentativas automáticas de reinício
+    if (message.toLowerCase().contains('busy')) {
+      _active = false;
+      _safeStop();
+    }
   }
 
   void _onResult(dynamic result) {
@@ -219,15 +290,22 @@ class VoiceNotifier extends Notifier<VoiceUiState> {
   }
 
   void _onStatus(String status) {
-    if (!_active) return;
+    if (!_active || !state.isListening) return;
+
     if (status == 'done' || status == 'notListening') {
-      Future.delayed(const Duration(milliseconds: 200), _listen);
+      // Reinicia apenas se o usuário ainda quer ouvir e não há outra sessão em andamento
+      // Tempo de espera aumentado para garantir liberação nativa antes de reconectar
+      Future<void>.delayed(const Duration(milliseconds: 500), () async {
+        if (_active && state.isListening && !_listenInProgress) {
+          await _listen();
+        }
+      });
     }
   }
 
   Future<void> stop() async {
     _active = false;
-    await _speech.stop();
+    await _safeStop();
     state = state.copyWith(isListening: false);
   }
 

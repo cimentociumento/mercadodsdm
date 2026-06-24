@@ -36,9 +36,16 @@ class ArchivedScreen extends ConsumerWidget {
                 leading: const Icon(Icons.archive),
                 title: Text(list.name),
                 trailing: TextButton(
-                  onPressed: () => ref
-                      .read(archivedListsProvider.notifier)
-                      .restoreList(list.id!),
+                  onPressed: () async {
+                    await ref
+                        .read(archivedListsProvider.notifier)
+                        .restoreList(list.id!);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Lista "${list.name}" restaurada')),
+                      );
+                    }
+                  },
                   child: const Text('Restaurar'),
                 ),
               );

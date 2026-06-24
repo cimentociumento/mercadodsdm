@@ -100,8 +100,14 @@ class _Body extends ConsumerWidget {
                 Routes.listDetail,
                 pathParameters: {'listId': '${list.id}'},
               ),
-              onArchive: () =>
-                  ref.read(listsProvider.notifier).archiveList(list.id!),
+              onArchive: () async {
+                await ref.read(listsProvider.notifier).archiveList(list.id!);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Lista "${list.name}" arquivada')),
+                  );
+                }
+              },
             ),
           ),
       ],

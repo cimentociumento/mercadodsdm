@@ -24,8 +24,18 @@ class _VoiceSheetState extends ConsumerState<VoiceSheet> {
 
   @override
   void dispose() {
+    // Encerra STT ao fechar o sheet — evita microfone preso em "busy"
     ref.read(voiceProvider.notifier).stop();
     super.dispose();
+  }
+
+  Future<void> _toggleListening(VoiceNotifier notifier) async {
+    final voice = ref.read(voiceProvider);
+    if (voice.isListening) {
+      await notifier.stop();
+    } else {
+      await notifier.start(widget.listId);
+    }
   }
 
   @override
@@ -94,9 +104,9 @@ class _VoiceSheetState extends ConsumerState<VoiceSheet> {
             children: [
               Expanded(
                 child: OutlinedButton(
-                  onPressed: () {
-                    notifier.stop();
-                    Navigator.pop(context);
+                  onPressed: () async {
+                    await notifier.stop();
+                    if (context.mounted) Navigator.pop(context);
                   },
                   child: const Text('Fechar'),
                 ),
@@ -104,7 +114,7 @@ class _VoiceSheetState extends ConsumerState<VoiceSheet> {
               const Gap(8),
               Expanded(
                 child: FilledButton.icon(
-                  onPressed: voice.isListening ? notifier.stop : () => notifier.start(widget.listId),
+                  onPressed: () => _toggleListening(notifier),
                   icon: Icon(voice.isListening ? Icons.stop : Icons.mic),
                   label: Text(voice.isListening ? 'Parar' : 'Ouvir'),
                 ),

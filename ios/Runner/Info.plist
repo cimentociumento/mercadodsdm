@@ -26,6 +26,10 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Este app usa o microfone para adicionar itens à lista por voz.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Este app usa reconhecimento de voz para identificar itens de compra.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
